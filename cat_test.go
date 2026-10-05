@@ -2,6 +2,44 @@ package main
 
 import "testing"
 
+func TestWanderAcrossScreens(t *testing.T) {
+	workAreas = []rect{ // the middle one lower: nothing above it
+		{0, 0, 1920, 1040}, {1920, 400, 2560, 1400}, {4480, 0, 1920, 1040}}
+	p := &Pet{win: &Win{w: 96}}
+	onScreen := func(x, y float64) bool {
+		for _, a := range workAreas {
+			if a.contains(int(x), int(y)) {
+				return true
+			}
+		}
+		return false
+	}
+	p.x, p.y = 100, 150 // top left of the left screen: a straight line to the right one would leave the screens
+	crossed, across := 0, 0
+	for range 200 {
+		start := p.here()
+		for _, spot := range p.wander() { // she walks a straight line to each spot
+			for i := range 101 {
+				f := float64(i) / 100
+				x, y := p.x+(spot[0]-p.x)*f, p.y+(spot[1]-p.y)*f
+				if !onScreen(x, y) || !onScreen(x+95, y+95) {
+					t.Fatalf("she'd walk off the screens at %v, %v on her way to %v", x, y, spot)
+				}
+			}
+			p.x, p.y = spot[0], spot[1]
+		}
+		if p.here() != start {
+			crossed++
+		}
+		if start == workAreas[0] && p.here() == workAreas[2] {
+			across++ // through the middle one, in one walk
+		}
+	}
+	if crossed == 0 || across == 0 {
+		t.Fatalf("she changed screens %d times, %d of them from one end to the other", crossed, across)
+	}
+}
+
 func TestSides(t *testing.T) {
 	workAreas = []rect{{0, 0, 2560, 1390}} // a screen with a 50 px panel at the bottom
 	p := &Pet{win: &Win{w: 96}, sheet: &Sheet{RubCheek: [2]float64{44, 26}}}
