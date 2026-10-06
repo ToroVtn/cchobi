@@ -432,10 +432,10 @@ func kwin(source, name string) {
 		out, _ := exec.Command("qdbus6", append([]string{"org.kde.KWin"}, args...)...).Output()
 		return strings.TrimSpace(string(out))
 	}
+	// run only queues the script, so the last run is unloaded here, on the next one, not right after
 	q("/Scripting", "org.kde.kwin.Scripting.unloadScript", name)
 	id := q("/Scripting", "org.kde.kwin.Scripting.loadScript", js, name)
 	q("/Scripting/Script"+id, "org.kde.kwin.Script.run")
-	q("/Scripting", "org.kde.kwin.Scripting.unloadScript", name)
 }
 
 const focusJS = `
