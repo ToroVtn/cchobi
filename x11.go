@@ -255,6 +255,8 @@ type Sheet struct {
 	MunchMouth  [2]float64        `json:"munch_mouth"`
 	NibbleMouth [2]float64        `json:"nibble_mouth"`
 	RubCheek    [2]float64        `json:"rub_cheek"`
+	ScratchWall [2]float64        `json:"scratch_wall"`
+	Floor       [2]float64        `json:"floor"`
 	CushionSeat [][2]float64      `json:"cushion_seats"`
 	PlantSize   [2]int            `json:"plant_size"`
 	PlantBite   [2]float64        `json:"plant_bite"`

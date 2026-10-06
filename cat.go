@@ -38,7 +38,8 @@ var idleActivities = []struct {
 }{{"sleep", 5, [2]float64{120, 420}}, {"loaf", 2, [2]float64{30, 90}}, {"sphinx", 2, [2]float64{30, 90}},
 	{"groom", 2, [2]float64{8, 20}}, {"sun", 2, [2]float64{60, 180}}, {"perch", 2, [2]float64{30, 120}},
 	{"munch", 2, [2]float64{6, 12}}, {"plantrub", 1, [2]float64{5, 10}},
-	{"siderub", 2, [2]float64{5, 10}}, {"yawn", 1, [2]float64{3.2, 3.2}},
+	{"siderub", 2, [2]float64{5, 10}}, {"wallscratch", 1, [2]float64{4, 8}}, {"floorscratch", 1, [2]float64{4, 8}},
+	{"yawn", 1, [2]float64{3.2, 3.2}},
 	{"smack", 1, [2]float64{3, 4}}, {"stretch", 1, [2]float64{4.6, 4.6}}}
 
 var (
@@ -407,7 +408,9 @@ type Pet struct {
 	bubbleKey, tooltip                           string
 	activity                                     *Activity
 	x, y                                         float64      // her sprite's top left on screen
-	route                                        [][2]float64 // the spots she's wandering through while Claude works
+	targetSpot                                   [2]float64   // where she's wandering to while Claude works
+	route                                        [][2]float64 // where she steps from screen to screen on her way somewhere
+	routeTo                                      rect         // the screen that route leads to
 }
 
 type heart struct {
@@ -454,6 +457,7 @@ func (p *Pet) start() {
 	}
 	p.activity = &Activity{name: "sleep", seconds: uniform(60, 300), arrived: true, until: mono() + uniform(20, 120)}
 	p.x, p.y, _ = p.target(p.activity)
+	p.targetSpot = [2]float64{p.x, p.y}
 	p.moveCat()
 	p.render()
 	p.win.show()
@@ -612,11 +616,8 @@ func (p *Pet) step() {
 		frame = "sit"
 	case len(p.working) > 0:
 		frame = walking
-		if len(p.route) == 0 {
-			p.route = p.wander()
-		}
-		if p.walkTo(p.route[0][0], p.route[0][1]) {
-			p.route = p.route[1:]
+		if p.walkVia(p.targetSpot[0], p.targetSpot[1]) {
+			p.targetSpot = p.randomSpot()
 		}
 	default:
 		frame = p.idle(now, walking, breath)
@@ -676,7 +677,7 @@ func (p *Pet) idle(now float64, walking string, breath int) string {
 	}
 	x, y, facing := p.target(act)
 	if !act.arrived {
-		if !p.walkTo(x, y) {
+		if !p.walkVia(x, y) {
 			return walking
 		}
 		act.arrived, act.until, act.t0 = true, now+act.seconds, p.tick
@@ -723,6 +724,10 @@ func (p *Pet) idle(now float64, walking string, breath int) string {
 		return fmt.Sprintf("groom%d", groomSeq[t/3%len(groomSeq)])
 	case "perch":
 		return fmt.Sprintf("perch%d", t/8%4)
+	case "wallscratch":
+		return fmt.Sprintf("scratchw%d", t/3%4)
+	case "floorscratch":
+		return fmt.Sprintf("scratchf%d", t/3%4)
 	}
 	return fmt.Sprintf("rub%d", t/3%4) // plantrub, siderub
 }
@@ -738,7 +743,8 @@ func (p *Pet) pickActivity(previous string) *Activity {
 		var options []option
 		for _, a := range idleActivities {
 			if (a.name != "sun" || (hour >= 8 && hour < 18)) && (a.name != "perch" || len(p.perches()) > 0) &&
-				(a.name != "siderub" || len(p.sides()) > 0) && (a.name != "munch" || len(p.foods()) > 0) {
+				(a.name != "siderub" || len(p.sides()) > 0) && (a.name != "munch" || len(p.foods()) > 0) &&
+				(a.name != "wallscratch" || len(p.sides()) > 0) && (a.name != "floorscratch" || len(p.floors()) > 0) {
 				options = append(options, option{a.name, a.weight})
 				total += a.weight
 			}
@@ -767,17 +773,27 @@ func (p *Pet) pickActivity(previous string) *Activity {
 		x, y := p.place(p.sheet.PerchAnchor, float64(randInt(w.x+40, w.x+w.w-40)), float64(w.y), true)
 		act.spot = [2]float64{x, y}
 		act.facing = []int{1, -1}[rand.Intn(2)]
-	case "siderub": // her cheek against a window's side, somewhere along it
+	case "siderub", "wallscratch": // her cheek, or her claws, against a side, somewhere along it
 		sides := p.sides()
 		e := sides[rand.Intn(len(sides))]
-		x, y := p.place(p.sheet.RubCheek, float64(e.x), float64(randInt(e.y0, e.y1)), e.facing > 0)
+		anchor := p.sheet.RubCheek
+		if name == "wallscratch" {
+			anchor = p.sheet.ScratchWall
+		}
+		x, y := p.place(anchor, float64(e.x), float64(randInt(e.y0, e.y1)), e.facing > 0)
 		act.spot, act.facing = [2]float64{x, y}, e.facing
+	case "floorscratch":
+		floors := p.floors()
+		f := floors[rand.Intn(len(floors))]
+		x, y := p.place(p.sheet.Floor, float64(randInt(f.x+40, f.x+f.w-40)), float64(f.y), true)
+		act.spot = [2]float64{x, y}
+		act.facing = []int{1, -1}[rand.Intn(2)]
 	case "loaf", "sphinx", "groom", "sun":
-		act.spot = p.clamp(p.x+float64(randInt(-300, 300)), p.y+float64(randInt(-200, 200)))
+		act.spot = p.randomSpot()
 	case "yawn", "smack", "stretch": // right where she is
 		act.spot = [2]float64{p.x, p.y}
 	}
-	if name == "perch" || name == "siderub" || rand.Float64() < .3 {
+	if slices.Contains([]string{"perch", "siderub", "wallscratch", "floorscratch"}, name) || rand.Float64() < .3 {
 		p.refreshLayout() // windows move; look again for next time
 	}
 	return act
@@ -1179,15 +1195,52 @@ func (p *Pet) perches() []rect {
 	return out
 }
 
+// floors: what she can stand on to scratch: window tops she could perch on, and the bottoms of
+// the screens, where no other screen carries on below. (Only x, y and width matter.)
+func (p *Pet) floors() []rect {
+	out := p.perches()
+	for _, a := range workAreas {
+		bottom := a.y + a.h
+		for _, part := range visible(a.x, a.x+a.w, workAreas, func(b rect) (int, int, bool) {
+			return b.x, b.x + b.w, b.y <= bottom && bottom < b.y+b.h
+		}) {
+			if part[1]-part[0] >= 160 {
+				out = append(out, rect{part[0], bottom, part[1] - part[0], 0})
+			}
+		}
+	}
+	return out
+}
+
 // An edge is a window's side she can rub against: her cheek goes on x, anywhere from y0 to y1,
 // and she faces it (1: it's on her right, -1: on her left).
 type edge struct{ x, y0, y1, facing int }
 
 // sides: the visible stretches of windows' sides with room beside them for her, and for her
-// bubble above.
+// bubble above; and the screens' own sides, where no other screen carries on.
 func (p *Pet) sides() []edge {
 	var out []edge
 	cat, cheek := p.win.w, int(p.sheet.RubCheek[1]*scale)
+	add := func(a rect, x int, part [2]int, facing int) { // a: the screen she stands on
+		y0 := max(part[0]+20, a.y+bubbleRoom+cheek)
+		y1 := min(part[1]-20, a.y+a.h-(cat-cheek))
+		if y1 > y0 {
+			out = append(out, edge{x, y0, y1, facing})
+		}
+	}
+	for _, a := range workAreas {
+		for _, facing := range []int{1, -1} { // its right side on her right, its left side on her left
+			x, beyond := a.x+a.w, a.x+a.w // where her cheek goes, and the pixels just past it
+			if facing < 0 {
+				x, beyond = a.x, a.x-1
+			}
+			for _, part := range visible(a.y, a.y+a.h, workAreas, func(b rect) (int, int, bool) {
+				return b.y, b.y + b.h, b.x <= beyond && beyond < b.x+b.w
+			}) {
+				add(a, x, part, facing)
+			}
+		}
+	}
 	for i, w := range p.windows {
 		for _, facing := range []int{1, -1} { // a left side she rubs from the left, a right side from the right
 			x, column := w.x, w.x // where her cheek goes, and the window's pixels along that side
@@ -1201,11 +1254,7 @@ func (p *Pet) sides() []edge {
 			for _, part := range visible(w.y, w.y+w.h, p.windows[i+1:], func(o rect) (int, int, bool) {
 				return o.y, o.y + o.h, o.x <= column && column < o.x+o.w
 			}) {
-				y0 := max(part[0]+20, a.y+bubbleRoom+cheek)
-				y1 := min(part[1]-20, a.y+a.h-(cat-cheek))
-				if y1 > y0 {
-					out = append(out, edge{x, y0, y1, facing})
-				}
+				add(a, x, part, facing)
 			}
 		}
 	}
@@ -1232,21 +1281,37 @@ func (p *Pet) walkTo(tx, ty float64) bool {
 }
 
 // here: the usable part of the screen she's on now.
-func (p *Pet) here() rect { return workArea(int(p.x)+p.win.w/2, int(p.y)+p.win.w/2) }
+func (p *Pet) here() rect { return p.screenOf(p.x, p.y) }
 
-// clamp keeps her on the screen she's on.
-func (p *Pet) clamp(x, y float64) [2]float64 { return p.clampTo(p.here(), x, y) }
+// screenOf: the usable part of the screen she'd be on with her sprite's top left at (x, y).
+func (p *Pet) screenOf(x, y float64) rect { return workArea(int(x)+p.win.w/2, int(y)+p.win.w/2) }
 
-// clampTo keeps a spot inside a screen's usable area g, with room above her for the bubble.
-func (p *Pet) clampTo(g rect, x, y float64) [2]float64 {
+// clamp keeps a spot inside a screen's usable area g, with room above her for the bubble.
+func (p *Pet) clamp(g rect, x, y float64) [2]float64 {
 	cat := float64(p.win.w)
 	return [2]float64{max(float64(g.x), min(x, float64(g.x+g.w)-cat)),
 		max(float64(g.y+bubbleRoom), min(y, float64(g.y+g.h)-cat))}
 }
 
-// wander: a walk to somewhere random, every spot she can reach equally likely. A screen that
-// can't be reached without leaving the screens (none of its edges is shared) is skipped.
-func (p *Pet) wander() [][2]float64 {
+// walkVia takes one step towards (tx, ty), going from screen to screen through the edges they
+// share so she never walks off them. True once she's there.
+func (p *Pet) walkVia(tx, ty float64) bool {
+	if g := p.screenOf(tx, ty); len(p.route) == 0 || g != p.routeTo { // somewhere else now: plan again
+		p.route, _ = p.crossings(g)
+		p.routeTo = g
+	}
+	if len(p.route) > 0 {
+		if p.walkTo(p.route[0][0], p.route[0][1]) {
+			p.route = p.route[1:]
+		}
+		return false
+	}
+	return p.walkTo(tx, ty) // on its screen (or it's out of reach that way: straight there)
+}
+
+// randomSpot: somewhere to go, every spot she can reach equally likely. A screen that can't be
+// reached without leaving the screens (it shares no edge with the others) is skipped.
+func (p *Pet) randomSpot() [2]float64 {
 	room := func(g rect) int { return (g.w - p.win.w) * (g.h - bubbleRoom - p.win.w) }
 	total := 0
 	for _, g := range workAreas {
@@ -1256,35 +1321,34 @@ func (p *Pet) wander() [][2]float64 {
 		n := rand.Intn(total)
 		for _, g := range workAreas {
 			if n -= room(g); n < 0 {
-				if route := p.routeTo(g); route != nil {
-					return route
+				if _, ok := p.crossings(g); ok {
+					return p.spotIn(g)
 				}
 				break
 			}
 		}
 	}
-	return [][2]float64{p.spotIn(p.here())}
+	return p.spotIn(p.here())
 }
 
-// routeTo: a walk to a random spot on screen g, through any screens on the way, stepping from
-// one to the next through the edge they share so she never walks off them. Nil if there's no
-// such way.
-func (p *Pet) routeTo(g rect) [][2]float64 {
+// crossings: the spots she steps through to get from her screen to screen g, two at each edge
+// on the way, through any screens in between. Not ok if there's no such way.
+func (p *Pet) crossings(g rect) ([][2]float64, bool) {
 	seen := map[rect]bool{}
-	var from func(s rect, x, y float64) [][2]float64
-	from = func(s rect, x, y float64) [][2]float64 {
+	var from func(s rect, x, y float64) ([][2]float64, bool)
+	from = func(s rect, x, y float64) ([][2]float64, bool) {
 		if s == g {
-			return [][2]float64{p.spotIn(g)}
+			return nil, true
 		}
 		seen[s] = true
 		for _, next := range workAreas {
 			if out, in, ok := p.crossing(s, next, x, y); ok && !seen[next] {
-				if rest := from(next, in[0], in[1]); rest != nil {
-					return append([][2]float64{out, in}, rest...)
+				if rest, ok := from(next, in[0], in[1]); ok {
+					return append([][2]float64{out, in}, rest...), true
 				}
 			}
 		}
-		return nil
+		return nil, false
 	}
 	return from(p.here(), p.x, p.y)
 }
@@ -1315,7 +1379,7 @@ func (p *Pet) crossing(a, b rect, x, y float64) (from, to [2]float64, ok bool) {
 	default:
 		return
 	}
-	return p.clampTo(a, x, y), p.clampTo(b, x, y), true
+	return p.clamp(a, x, y), p.clamp(b, x, y), true
 }
 
 // ---- drawing ----
@@ -1444,7 +1508,7 @@ func (p *Pet) onMotion(rx, ry, _, _ int) {
 	if p.dragging { // hold her by the belly: that pixel of the sprite stays under the pointer
 		p.x, p.y = p.place(p.sheet.HangGrab, float64(rx), float64(ry), p.facingRight)
 		p.moveCat()
-		p.route = nil // walking resumes from wherever she's dropped
+		p.route, p.targetSpot = nil, [2]float64{p.x, p.y} // walking resumes from wherever she's dropped
 	} else if p.press == nil { // the pointer is near her: she rubs against it
 		p.hover = true
 		p.pointerX = rx // she turns to it only once she's actually rubbing (see step)

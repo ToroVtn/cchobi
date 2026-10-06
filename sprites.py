@@ -43,6 +43,8 @@ PERCH_ANCHOR = (24, 38)    # sits on a window's top edge
 MUNCH_MOUTH = (44, 33)     # goes to a leaf on the plant
 NIBBLE_MOUTH = (44, 40)    # goes to a leaf lying on the floor
 RUB_CHEEK = (44, 26)       # presses against the plant
+SCRATCH_WALL = (45, 26)    # x: the wall she's up against, scratching; y as RUB_CHEEK's, so she fits the same sides
+FLOOR = (24, 47)           # stands on a floor: a window's top, or the bottom of the screen
 
 
 class Canvas:
@@ -448,14 +450,15 @@ def crouch(k, treat=False, low=False):
 
 
 # ---- stretching: first the front (a bow), then a back leg ----
-def stretch_front(s):
+def stretch_front(s, rake=(0, 0), eyes='closed'):
     """s 0..1: from standing to a full bow: front legs reaching out along the floor, chest down,
-    bottom and tail up."""
+    bottom and tail up. rake: how far the far and near front paws have pulled back (scratching)."""
     c = Canvas()
     reach = 34 + 10 * s                                        # where the front paws get to
     c.ellipse(24, 46.5, 17, 1.2, 's')
     c.line((16, 27 - 3 * s), (16.5, GROUND), 2, 1.2, 'd'), c.ellipse(17.3, GROUND, 1.8, 1.1, 'v')       # far hind leg
-    c.line((30, 32 + 5 * s), (reach - 2, 44.5), 1.8, 1.3, 'd'), c.ellipse(reach - 1.5, 44.6, 1.9, 1.1, 'v')
+    far = reach - 2 - rake[0]
+    c.line((30, 32 + 5 * s), (far, 44.5), 1.8, 1.3, 'd'), c.ellipse(far + .5, 44.6, 1.9, 1.1, 'v')
     c.curve((11, 25 - 4 * s), (5, 16 - 4 * s), (8, 5), 2.2, 1.3, '#')                                  # tail up
     c.tf = (.15 + .4 * s, 22, 30, 0, 0)                        # the body tips forward, chest going down
     c.ellipse(22, 30, 12.5, 5.6, '#'), c.ellipse(11, 30, 6.5, 6.2, '#'), c.ellipse(31, 30, 5, 5.5, '#')
@@ -463,9 +466,34 @@ def stretch_front(s):
     c.tf = None
     c.line((14, 28 - 3 * s), (14.5, GROUND), 2.2, 1.3, '#')                                            # near hind leg
     c.line((14.5, GROUND - 3), (14.5, GROUND), 1.2, 1.2, 'w'), c.ellipse(15.3, GROUND, 1.8, 1.1, 'w')
-    c.line((31, 34 + 5 * s), (reach, 44.5), 2, 1.4, '#')                                               # near front leg
-    c.ellipse(reach + .5, 44.6, 2.2, 1.2, 'w')
-    side_head(c, 36 + 1.5 * s, 25 + 11 * s, eyes='closed')     # head goes down with the chest
+    near = reach - rake[1]
+    c.line((31, 34 + 5 * s), (near, 44.5), 2, 1.4, '#')                                                # near front leg
+    c.ellipse(near + .5, 44.6, 2.2, 1.2, 'w')
+    for paw, back in ((far, rake[0]), (near, rake[1])):
+        if back:                                               # claws out, raking
+            c.put(paw + 2.5, 45, 'k'), c.put(paw + 2, 44, 'k')
+    side_head(c, 36 + 1.5 * s, 25 + 11 * s, eyes=eyes)         # head goes down with the chest
+    return c.g
+
+
+def scratch_wall(k):
+    """Up on her hind legs against a wall in front of her, front paws raking down it in turn."""
+    c = Canvas()
+    far, near = (0, 2, 4, 2)[k], (4, 2, 0, 2)[k]              # how far each paw has pulled down
+    c.ellipse(21, 46.5, 10, 1.2, 's')
+    standing_leg(c, (23, 39), 24, 'd', 'v')                                                  # far hind leg
+    c.line((30, 24), (42.5, 4 + far), 1.8, 1.3, 'd'), c.ellipse(43.3, 4 + far, 1.2, 1.9, 'v')  # far front leg
+    c.curve((17, 40), (5, 45), (4, 35), 2.2, 1.3, '#')                                       # tail, on the floor
+    c.ellipse(20, 38, 6.5, 6.5, '#')                                                         # haunch
+    c.line((22, 36), (28, 24), 6, 5, '#')                                                    # body, upright
+    c.ellipse(29, 24, 4.5, 5, '#')                                                           # shoulders
+    c.line((26, 35), (31, 27), 1.3, 1.5, 'w', only='#')                                      # belly and chest
+    standing_leg(c, (19, 40), 20, '#', 'w')                                                  # near hind leg
+    c.line((31, 25), (42.5, 8 + near), 2, 1.5, '#'), c.ellipse(43.3, 8 + near, 1.3, 2.1, 'w')  # near front leg
+    side_head(c, 29, 17)                                                                     # looking up the wall
+    for y, back in ((4 + far, far), (8 + near, near)):
+        if back:                                                                             # claws out
+            c.put(44, y - 1, 'k'), c.put(44, y + 1, 'k')
     return c.g
 
 
@@ -699,6 +727,9 @@ def frames():
     out.update({f'hang{i}': hang(i / HANG_FRAMES) for i in range(HANG_FRAMES)})
     out.update({f'stretchf{i}': stretch_front((i + 1) / 2) for i in range(2)})   # halfway, then all the way
     out.update({f'stretchb{i}': stretch_back((i + 1) / 2) for i in range(2)})
+    out.update({f'scratchw{i}': scratch_wall(i) for i in range(4)})
+    out.update({f'scratchf{i}': stretch_front(.8, rake, 'open')
+                for i, rake in enumerate(((0, 4), (2, 2), (4, 0), (2, 2)))})
     out.update({f'sleep{i}': sleep(0.4 * i) for i in range(2)})
     out.update({f'loaf{i}': loaf(blink=bool(i)) for i in range(2)})
     out.update({f'perch{i}': loaf(dy=-7, tail_swing=(0, 1, 0, -1)[i]) for i in range(4)})
@@ -794,6 +825,7 @@ def export(folder):
         'sprites': index, 'size': SIZE, 'walk_frames': WALK_FRAMES, 'hang_frames': HANG_FRAMES,
         'accent': ACCENT, 'hang_grab': HANG_GRAB, 'sleep_anchor': SLEEP_ANCHOR, 'perch_anchor': PERCH_ANCHOR,
         'munch_mouth': MUNCH_MOUTH, 'nibble_mouth': NIBBLE_MOUTH, 'rub_cheek': RUB_CHEEK,
+        'scratch_wall': SCRATCH_WALL, 'floor': FLOOR,
         'cushion_seats': [cushion_seat(s) for s in CUSHION_SQUISH],
         'plant_size': [PLANT_W, PLANT_H], 'plant_bite': PLANT_BITE, 'plant_soil': PLANT_SOIL,
         'plant_cheek': PLANT_CHEEK, 'plant_leaves': PLANT_LEAVES, 'dry_order': DRY_ORDER,
