@@ -92,6 +92,7 @@ func hook() {
 		return
 	}
 	event["vscode"] = os.Getenv("VSCODE_PID") != "" || os.Getenv("TERM_PROGRAM") == "vscode"
+	event["project_dir"] = os.Getenv("CLAUDE_PROJECT_DIR") // where it started: cwd moves when Claude cds
 	line, _ := json.Marshal(event)
 	c, err := net.DialTimeout("unix", sock, 500*time.Millisecond)
 	if err != nil {
@@ -423,26 +424,45 @@ func uniform(a, b float64) float64 { return a + rand.Float64()*(b-a) }
 
 // ---- finding and focusing windows, through KWin ----
 
-// kwin runs a KWin script. It lives inside the compositor, so unlike an app on Wayland it can see
-// and focus any window.
-func kwin(source, name string) {
+// kwinAsk runs a KWin script and returns what it prints after tag (a const it's given), or "" if
+// it says nothing within two seconds. The script lives inside the compositor, so unlike an app on
+// Wayland it can see and focus any window; but it can only answer by printing to the journal.
+func kwinAsk(source, name string) string {
+	tag := fmt.Sprintf("cchobi-%x ", rand.Uint32())
 	js := runtime_ + "/" + name + ".js"
-	os.WriteFile(js, []byte(source), 0o644)
-	q := func(args ...string) string {
-		out, _ := exec.Command("qdbus6", append([]string{"org.kde.KWin"}, args...)...).Output()
-		return strings.TrimSpace(string(out))
+	os.WriteFile(js, []byte(fmt.Sprintf("const tag = %q;\n", tag)+source), 0o644)
+	q := func(args ...string) {
+		exec.Command("qdbus6", append([]string{"org.kde.KWin", "/Scripting"}, args...)...).Run()
 	}
-	// run only queues the script, so the last run is unloaded here, on the next one, not right after
-	q("/Scripting", "org.kde.kwin.Scripting.unloadScript", name)
-	id := q("/Scripting", "org.kde.kwin.Scripting.loadScript", js, name)
-	q("/Scripting/Script"+id, "org.kde.kwin.Script.run")
+	// start runs whatever's loaded and not yet running. (Not Script<id>.run: KWin hands out ids
+	// that loaded scripts still have, so that can reach some other script.)
+	q("org.kde.kwin.Scripting.unloadScript", name)
+	q("org.kde.kwin.Scripting.loadScript", js, name)
+	q("org.kde.kwin.Scripting.start")
+	defer q("org.kde.kwin.Scripting.unloadScript", name) // only once it's answered: it runs a moment after start
+	for range 10 {
+		time.Sleep(200 * time.Millisecond)
+		out, _ := exec.Command("journalctl", "--user", "--since", "-1min", "-o", "cat", "--no-pager", "--grep", tag).Output()
+		for _, line := range strings.Split(string(out), "\n") {
+			if _, after, ok := strings.Cut(line, tag); ok {
+				return after
+			}
+		}
+	}
+	return ""
 }
 
+// focusJS says "ok" once the window is active (an X11 one only becomes so a moment later).
 const focusJS = `
 const all = workspace.windowList().filter(w => w.normalWindow && w.caption.includes(%s));
 const code = all.filter(w => /code/i.test(w.resourceClass));
 const pick = (%t ? code : all.filter(w => !code.includes(w)))[0] || all[0];
-if (pick) { pick.minimized = false; workspace.activeWindow = pick; }
+if (pick) {
+    pick.minimized = false;
+    workspace.activeWindow = pick;
+    if (workspace.activeWindow === pick) print(tag + "ok");
+    else workspace.windowActivated.connect(w => { if (w === pick) print(tag + "ok"); });
+}
 `
 
 const layoutJS = `
@@ -453,7 +473,7 @@ const areas = workspace.screens.map(s => {
     const a = workspace.clientArea(KWin.MaximizeArea, s, workspace.currentDesktop);
     return [a.x, a.y, a.width, a.height];
 });
-print("%s" + JSON.stringify({windows: windows, areas: areas}));
+print(tag + JSON.stringify({windows: windows, areas: areas}));
 `
 
 // urlScheme: vscode:// for Microsoft's build, code-oss:// for the open-source one, and so on.
@@ -473,11 +493,12 @@ func urlScheme() string {
 // folder (or a terminal that doesn't show the folder) pick the first match.
 func focus(p *Pending) {
 	project, _ := json.Marshal(p.project)
-	kwin(fmt.Sprintf(focusJS, project, p.vscode), "cchobi-focus")
-	if p.vscode && p.session != "" {
-		// The Claude extension opens a session's tab from a URL; it lands in the window just focused.
+	focused := kwinAsk(fmt.Sprintf(focusJS, project, p.vscode), "cchobi-focus") == "ok"
+	if focused && p.vscode && p.session != "" {
+		// The Claude extension opens a session's tab from a URL. It lands in the VS Code window
+		// focused last, so only once that's this one: in another, it would start a new session.
 		url := urlScheme() + "://anthropic.claude-code/open?session=" + p.session
-		time.Sleep(300 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond) // VS Code hears it's been focused
 		exec.Command("code", "--open-url", url).Start()
 	}
 }
@@ -486,26 +507,15 @@ func focus(p *Pending) {
 // against), and each screen's usable area: the screen minus its panels, which XWayland can't
 // tell her.
 func layout() (windows, areas []rect) {
-	tag := fmt.Sprintf("cchobi-%x ", rand.Uint32())
-	kwin(fmt.Sprintf(layoutJS, tag), "cchobi-layout")
-	for range 10 { // a KWin script can only answer by printing to the journal
-		time.Sleep(200 * time.Millisecond)
-		out, _ := exec.Command("journalctl", "--user", "--since", "-1min", "-o", "cat", "--no-pager", "--grep", tag).Output()
-		for _, line := range strings.Split(string(out), "\n") {
-			if _, after, ok := strings.Cut(line, tag); ok {
-				var got struct{ Windows, Areas [][4]float64 } // KWin's geometry can be fractional
-				json.Unmarshal([]byte(after), &got)
-				toRects := func(in [][4]float64) (out []rect) {
-					for _, r := range in {
-						out = append(out, rect{int(r[0]), int(r[1]), int(r[2]), int(r[3])})
-					}
-					return out
-				}
-				return toRects(got.Windows), toRects(got.Areas)
-			}
+	var got struct{ Windows, Areas [][4]float64 } // KWin's geometry can be fractional
+	json.Unmarshal([]byte(kwinAsk(layoutJS, "cchobi-layout")), &got)
+	toRects := func(in [][4]float64) (out []rect) {
+		for _, r := range in {
+			out = append(out, rect{int(r[0]), int(r[1]), int(r[2]), int(r[3])})
 		}
+		return out
 	}
-	return nil, nil
+	return toRects(got.Windows), toRects(got.Areas)
 }
 
 // lastReply: the last thing Claude said or tried to do in a session, read from its transcript.

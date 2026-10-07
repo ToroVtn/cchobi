@@ -4,6 +4,7 @@ package main
 // the watering can, the bin), her speech bubble and the status card from the tray.
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -507,8 +508,8 @@ func (p *Pet) handle(e map[string]any) {
 			text = "done!"
 		}
 		project := ""
-		if cwd := str(e["cwd"]); cwd != "" {
-			project = filepath.Base(cwd)
+		if dir := cmp.Or(str(e["project_dir"]), str(e["cwd"])); dir != "" { // the one in the window's title
+			project = filepath.Base(dir)
 		}
 		p.pending = append(p.pending, &Pending{session: sid, project: project, vscode: e["vscode"] == true,
 			transcript: str(e["transcript_path"]), text: text})
