@@ -6,14 +6,14 @@ For now just her sounds, which live in ~/.cchobi: switch each one on or off, pre
 remove it (✕, moved to ~/.cchobi/removed), or add new ones. Anything added, here or by dropping
 files into the folders, starts out switched on. Every change is sent to her over her socket.
 """
-import json, os, re, shutil, socket, subprocess
+import json, os, re, shutil, socket, subprocess, tempfile
 from pathlib import Path
 
 from PySide6.QtWidgets import (QApplication, QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QCheckBox,
                                QPushButton, QFileDialog, QWidget)
 
 HERE = Path(__file__).resolve().parent
-SOCK = Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp')) / 'cchobi.sock'
+SOCK = Path(os.environ.get('XDG_RUNTIME_DIR', tempfile.gettempdir())) / 'cchobi.sock'
 DATA = Path.home() / '.cchobi'
 DEFAULTS = HERE / 'sounds'
 SOUNDS = {'meows': 'Meows', 'purrs': 'Purrs', 'water': 'Watering the plant'}

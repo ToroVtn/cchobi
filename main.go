@@ -29,20 +29,19 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"fyne.io/systray"
 )
 
 var (
-	home = os.Getenv("HOME")
-	here = func() string {
+	home, _ = os.UserHomeDir()
+	here    = func() string {
 		exe, _ := os.Executable()
 		exe, _ = filepath.EvalSymlinks(exe)
 		return filepath.Dir(exe)
 	}()
-	runtime_ = envOr("XDG_RUNTIME_DIR", "/tmp")
+	runtime_ = envOr("XDG_RUNTIME_DIR", os.TempDir())
 	sock     = runtime_ + "/cchobi.sock"
 	data     = home + "/.cchobi"    // her sounds; change them from Settings, or by hand
 	stateF   = data + "/state.json" // where her things are, her plant's state, which sounds are off
@@ -99,7 +98,7 @@ func hook() {
 		if event["hook_event_name"] == "SessionStart" { // pet isn't running yet: start it
 			exe, _ := os.Executable()
 			cmd := exec.Command(exe)
-			cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+			detach(cmd)
 			cmd.Start()
 		}
 		return
@@ -207,19 +206,7 @@ func run() error {
 	go scanSounds(func(s *Sounds) { calls <- func() { pet.sounds = s } })
 	later(10*time.Second, debug.FreeOSMemory) // what loading her took, back to the system once she's settled
 
-	events := make(chan func())
-	go func() {
-		for {
-			ev, err := X.WaitForEvent()
-			if ev == nil && err == nil {
-				events <- func() { panic("lost the X connection") }
-				return
-			}
-			if ev != nil {
-				events <- func() { dispatch(ev) }
-			}
-		}
-	}()
+	events := windowEvents()
 	tick := time.NewTicker(tickMS * time.Millisecond)
 	for {
 		select {
@@ -389,137 +376,7 @@ func wavInfo(f string) (rate int, seconds float64) {
 
 func wavSeconds(f string) float64 { _, s := wavInfo(f); return s }
 
-// play a sound at a volume (0..1 on PulseAudio's scale, which is cubic: 0.8 is about -6 dB).
-// play starts a sound and returns its player, so it can be faded out early.
-func play(file string, volume float64) *os.Process {
-	cmd := exec.Command("paplay", fmt.Sprintf("--volume=%d", int(volume*65536)), file)
-	if cmd.Start() != nil {
-		return nil
-	}
-	go cmd.Wait()
-	return cmd.Process
-}
-
-// fadeOut turns a playing sound down over about a second, then stops it. paplay can't change
-// its volume once it's playing, so this goes through pactl, finding its stream by its pid.
-func fadeOut(proc *os.Process, volume float64) {
-	go func() {
-		defer proc.Kill()
-		out, _ := exec.Command("pactl", "-f", "json", "list", "sink-inputs").Output()
-		var streams []struct {
-			Index      int               `json:"index"`
-			Properties map[string]string `json:"properties"`
-		}
-		json.Unmarshal(out, &streams)
-		for _, s := range streams {
-			if s.Properties["application.process.id"] == strconv.Itoa(proc.Pid) {
-				for i := 19; i >= 0; i-- {
-					exec.Command("pactl", "set-sink-input-volume", strconv.Itoa(s.Index),
-						fmt.Sprintf("%.1f%%", volume*100*float64(i)/20)).Run()
-					time.Sleep(50 * time.Millisecond)
-				}
-			}
-		}
-	}()
-}
-
 func uniform(a, b float64) float64 { return a + rand.Float64()*(b-a) }
-
-// ---- finding and focusing windows, through KWin ----
-
-// kwinAsk runs a KWin script and returns what it prints after tag (a const it's given), or "" if
-// it says nothing within two seconds. The script lives inside the compositor, so unlike an app on
-// Wayland it can see and focus any window; but it can only answer by printing to the journal.
-func kwinAsk(source, name string) string {
-	tag := fmt.Sprintf("cchobi-%x ", rand.Uint32())
-	js := runtime_ + "/" + name + ".js"
-	os.WriteFile(js, []byte(fmt.Sprintf("const tag = %q;\n", tag)+source), 0o644)
-	q := func(args ...string) {
-		exec.Command("qdbus6", append([]string{"org.kde.KWin", "/Scripting"}, args...)...).Run()
-	}
-	// start runs whatever's loaded and not yet running. (Not Script<id>.run: KWin hands out ids
-	// that loaded scripts still have, so that can reach some other script.)
-	q("org.kde.kwin.Scripting.unloadScript", name)
-	q("org.kde.kwin.Scripting.loadScript", js, name)
-	q("org.kde.kwin.Scripting.start")
-	defer q("org.kde.kwin.Scripting.unloadScript", name) // only once it's answered: it runs a moment after start
-	for range 10 {
-		time.Sleep(200 * time.Millisecond)
-		out, _ := exec.Command("journalctl", "--user", "--since", "-1min", "-o", "cat", "--no-pager", "--grep", tag).Output()
-		for _, line := range strings.Split(string(out), "\n") {
-			if _, after, ok := strings.Cut(line, tag); ok {
-				return after
-			}
-		}
-	}
-	return ""
-}
-
-// focusJS says "ok" once the window is active (an X11 one only becomes so a moment later).
-const focusJS = `
-const all = workspace.windowList().filter(w => w.normalWindow && w.caption.includes(%s));
-const code = all.filter(w => /code/i.test(w.resourceClass));
-const pick = (%t ? code : all.filter(w => !code.includes(w)))[0] || all[0];
-if (pick) {
-    pick.minimized = false;
-    workspace.activeWindow = pick;
-    if (workspace.activeWindow === pick) print(tag + "ok");
-    else workspace.windowActivated.connect(w => { if (w === pick) print(tag + "ok"); });
-}
-`
-
-const layoutJS = `
-const windows = workspace.stackingOrder
-    .filter(w => w.normalWindow && !w.minimized && w.desktops.includes(workspace.currentDesktop))
-    .map(w => [w.frameGeometry.x, w.frameGeometry.y, w.frameGeometry.width, w.frameGeometry.height]);
-const areas = workspace.screens.map(s => {
-    const a = workspace.clientArea(KWin.MaximizeArea, s, workspace.currentDesktop);
-    return [a.x, a.y, a.width, a.height];
-});
-print(tag + JSON.stringify({windows: windows, areas: areas}));
-`
-
-// urlScheme: vscode:// for Microsoft's build, code-oss:// for the open-source one, and so on.
-func urlScheme() string {
-	for _, p := range []string{"/usr/lib/code/product.json", "/usr/share/code/resources/app/product.json",
-		"/opt/visual-studio-code/resources/app/product.json"} {
-		var product struct{ UrlProtocol string }
-		if b, err := os.ReadFile(p); err == nil && json.Unmarshal(b, &product) == nil && product.UrlProtocol != "" {
-			return product.UrlProtocol
-		}
-	}
-	return "vscode"
-}
-
-// focus brings up the window of the session that called, and in VS Code its Claude tab.
-// ponytail: matches the window by project folder name in its title; two windows on the same
-// folder (or a terminal that doesn't show the folder) pick the first match.
-func focus(p *Pending) {
-	project, _ := json.Marshal(p.project)
-	focused := kwinAsk(fmt.Sprintf(focusJS, project, p.vscode), "cchobi-focus") == "ok"
-	if focused && p.vscode && p.session != "" {
-		// The Claude extension opens a session's tab from a URL. It lands in the VS Code window
-		// focused last, so only once that's this one: in another, it would start a new session.
-		url := urlScheme() + "://anthropic.claude-code/open?session=" + p.session
-		time.Sleep(100 * time.Millisecond) // VS Code hears it's been focused
-		exec.Command("code", "--open-url", url).Start()
-	}
-}
-
-// layout asks KWin where the open windows are, bottom to top (for her to perch on and rub
-// against), and each screen's usable area: the screen minus its panels, which XWayland can't
-// tell her.
-func layout() (windows, areas []rect) {
-	var got struct{ Windows, Areas [][4]float64 } // KWin's geometry can be fractional
-	json.Unmarshal([]byte(kwinAsk(layoutJS, "cchobi-layout")), &got)
-	toRects := func(in [][4]float64) (out []rect) {
-		for _, r := range in {
-			out = append(out, rect{int(r[0]), int(r[1]), int(r[2]), int(r[3])})
-		}
-		return out
-	}
-	return toRects(got.Windows), toRects(got.Areas)
-}
 
 // lastReply: the last thing Claude said or tried to do in a session, read from its transcript.
 func lastReply(path string) string {

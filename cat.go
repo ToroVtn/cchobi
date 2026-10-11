@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"fyne.io/systray"
-	"github.com/jezek/xgb/xproto"
 )
 
 const (
@@ -111,7 +110,7 @@ func newProp(frames []*image.NRGBA) *Prop {
 	b := frames[0].Bounds()
 	p := &Prop{Win: newWin(b.Dx()*scale, b.Dy()*scale), frames: frames, frame: -1,
 		dropped: func() {}, clicked: func() {}}
-	var shape []xproto.Rectangle
+	var shape []rect
 	for _, f := range frames {
 		shape = append(shape, shapeOf(f, 0, 0, scale, false)...)
 	}
@@ -410,7 +409,7 @@ type Pet struct {
 	facingRight                                  bool
 	frame, walkView                              string
 	drawn                                        string
-	shapes                                       map[string][]xproto.Rectangle
+	shapes                                       map[string][]rect
 	press                                        *[2]int
 	dragging, hover, expanded, pouring           bool
 	pointerX                                     int
@@ -438,7 +437,7 @@ func newPet(s *Sheet, g *Garden, muted map[string][]string) *Pet {
 		return out
 	}
 	p := &Pet{sheet: s, garden: g, muted: muted, sounds: &Sounds{}, working: map[string]float64{},
-		shapes: map[string][]xproto.Rectangle{}, frame: "sleep0", walkView: "walk"}
+		shapes: map[string][]rect{}, frame: "sleep0", walkView: "walk"}
 	p.cushion = newProp(frames("cushion", len(s.CushionSeat)))
 	p.plant = newPlant(s, g)
 	p.can = newProp(frames("can", 6)) // only out while you're watering

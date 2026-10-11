@@ -70,20 +70,24 @@ You can also just drop `.wav` files into the folders. In `meows/`, other formats
 
 | What | Needed for |
 |---|---|
-| Linux with KDE Plasma 6 (Wayland, with XWayland) | Asking KWin, through scripts run with `qdbus6` and read back with `journalctl`, which window to focus, where windows are, and where the panels are |
+| Linux with X11, or Wayland with XWayland | Showing her |
+| One of the desktops below | Knowing where windows and panels are (to perch on and rub against), and focusing a session's window. Elsewhere (GNOME, niri, Hyprland for now) she still works, just without those. |
+| &nbsp;&nbsp;KDE Plasma 6 | Scripts run in KWin with `qdbus6`, read back with `journalctl` |
+| &nbsp;&nbsp;sway | `swaymsg` |
+| &nbsp;&nbsp;any X11 window manager that speaks EWMH (Xfce, Openbox, i3...) | Nothing extra |
 | Go | Building her |
 | Python 3 | Drawing the sprites (only when changing them) |
 | PySide6 | The Settings window |
-| ffmpeg | Sounds |
-| `paplay` (PulseAudio or PipeWire) | Sounds |
-| fontconfig | Finding your KDE fixed-width font |
+| ffmpeg | Sounds (on Windows its `ffplay` also plays them) |
+| `paplay` and `pactl` (PulseAudio or PipeWire) | Sounds, on Linux |
+| fontconfig | Finding your KDE fixed-width font (without it: Go Mono) |
 
 ### Build
 
 ```sh
 python3 sprites.py   # redraws assets/sprites.png + sprites.json (only needed after changing a drawing)
 go build -ldflags="-s -w" -o cchobi .
-go test              # checks the plant's rules
+go test              # checks the plant's rules, her reach, and reading sway
 ```
 
 The sprite sheet is built into the binary. `settings.py` and `sounds/` must sit next to it, so to run her elsewhere, copy those three.
@@ -108,10 +112,13 @@ Add the hook to `~/.claude/settings.json` for each of these events: `SessionStar
 
 | File | What it is |
 |---|---|
-| `main.go` | Starting up, the hook, saving state, sounds, KWin (focusing windows; where windows and panels are), the tray |
+| `main.go` | Starting up, the hook, saving state, sounds, the tray |
 | `cat.go` | Her behaviour each tick (50 ms), her things (cushion, plant, leaves, watering can, bin), her speech bubble, the status card |
 | `garden.go` | The plant's rules, with no drawing. `garden_test.go` checks them; `cat_test.go` checks which window edges she can reach. |
-| `x11.go` | Windows, drawing and text directly on X11, with no toolkit. Each thing of hers is a borderless see-through window that only catches the mouse where something is drawn. |
+| `x11.go` | Her windows, directly on X11, with no toolkit. Each thing of hers is a borderless see-through window that only catches the mouse where something is drawn. The only file that draws on screen. |
+| `draw.go` | The sprite sheet, boxes and text, drawn into plain images |
+| `desktop.go` | Screens, and picking which desktop she asks where windows are: `kwin.go` (KDE), `sway.go`, `ewmh.go` (any X11 window manager). `desktop_test.go` checks the sway parsing. |
+| `os_unix.go`, `os_windows.go` | Playing sounds and starting detached, per OS |
 | `sprites.py` | Draws every frame procedurally and exports the sprite sheet. Each frame is built from shapes, then shaded with rim light and dithering. |
 | `settings.py` | The Settings window. A separate program that runs only while it's open and tells her about changes over her socket. |
 | `tools/clean_meows.py` | The meow cleaner |
