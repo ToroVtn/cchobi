@@ -179,12 +179,13 @@ func showSaid(failed bool) {
 // installDeps: nothing to install, on Windows.
 func installDeps() {}
 
-// removeDir: a running program can't delete itself on Windows, so if that's what's in dir, a
-// detached cmd deletes it once this one has exited.
-func removeDir(dir string) {
-	if os.RemoveAll(dir) != nil {
-		cmd := exec.Command("cmd", "/c", "ping -n 3 127.0.0.1 >nul & rmdir /s /q", dir)
-		cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: detachedProcess | createNoWindow}
+// removeLater removes a file or folder. A running program can't delete itself on Windows, so if
+// that's what it is (or holds), a detached cmd deletes it once this one has exited.
+func removeLater(path string) {
+	if os.RemoveAll(path) != nil {
+		cmd := exec.Command("cmd")
+		cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: detachedProcess | createNoWindow,
+			CmdLine: fmt.Sprintf(`cmd /c "ping -n 3 127.0.0.1 >nul & rmdir /s /q "%[1]s" 2>nul & del /f /q "%[1]s" 2>nul"`, path)}
 		cmd.Start()
 	}
 }

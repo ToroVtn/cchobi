@@ -30,7 +30,17 @@ Each of these:
 - on Linux, installs what plays her sounds (`paplay`, `pactl`) if it's missing, with your package manager
 - starts her. From then on, starting a Claude Code session also starts her.
 
-Run the same again to update her. To take her out: `~/.local/share/cchobi/cchobi uninstall` (Windows: from Settings > Apps). Her sounds and state in `~/.cchobi` stay.
+Run the same again to update her.
+
+### Uninstall
+
+| Installed with | Uninstall with |
+|---|---|
+| the Linux script | `~/.local/share/cchobi/cchobi uninstall` |
+| Windows | Settings > Apps > cchobi > Uninstall, or in PowerShell: `& "$env:LOCALAPPDATA\cchobi\cchobi.exe" uninstall` |
+| Go | `cchobi uninstall` (it also removes itself from `~/go/bin`) |
+
+That stops her, takes her hooks out of Claude Code's settings (leaving the rest), and removes her and her menu entry. Her sounds and state in `~/.cchobi` stay; delete that folder too to forget her completely.
 
 ## What she does
 

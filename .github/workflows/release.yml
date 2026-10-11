@@ -41,6 +41,8 @@ jobs:
           \`\`\`
           **With Go**, anywhere: \`go install github.com/${{ github.repository }}@latest && cchobi install\`
 
-          Run the same again to update her. The other files below are what these use.
+          Run the same again to update her. To uninstall: \`~/.local/share/cchobi/cchobi uninstall\` on Linux, Settings > Apps on Windows, \`cchobi uninstall\` with Go.
+
+          The other files below are what these use.
           NOTES
           gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file notes.md

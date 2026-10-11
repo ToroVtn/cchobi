@@ -72,9 +72,27 @@ func uninstall() error {
 		return fmt.Errorf("unhooking her from Claude Code: %w", err)
 	}
 	removeLauncher()
-	removeDir(installDir())
+	removeLater(installDir())
+	exe, _ := os.Executable()
+	exe, _ = filepath.EvalSymlinks(exe)
+	if bin := goBin(); bin != "" && strings.EqualFold(filepath.Dir(exe), bin) {
+		removeLater(exe) // what go install put there: nothing else would take it out
+	}
 	say("Uninstalled. Her sounds and state are still in %s; delete that too to forget her completely.", data)
 	return nil
+}
+
+// goBin: where go install puts programs, if Go's here.
+func goBin() string {
+	out, err := exec.Command("go", "env", "GOBIN", "GOPATH").Output()
+	if err != nil {
+		return ""
+	}
+	gobin, gopath, _ := strings.Cut(string(out), "\n") // GOBIN is usually empty: its line too
+	if gobin = strings.TrimSpace(gobin); gobin != "" {
+		return filepath.Clean(gobin)
+	}
+	return filepath.Join(filepath.SplitList(strings.TrimSpace(gopath))[0], "bin")
 }
 
 // said: everything install or uninstall has said, for a message box when there's no terminal to

@@ -103,7 +103,8 @@ Terminal=false
 
 func removeLauncher() { os.Remove(launcher()) }
 
-func removeDir(dir string) { os.RemoveAll(dir) }
+// removeLater removes a file or folder (now: on Linux, a running program can delete itself).
+func removeLater(path string) { os.RemoveAll(path) }
 
 // requirements: the programs she runs that the installer can't install, and what for.
 func requirements() [][2]string {
