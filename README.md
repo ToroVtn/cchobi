@@ -2,9 +2,8 @@
 
 A desktop pet for Claude Code: a little black tuxedo cat, drawn in pixel art in the style of the game *Replaced*.
 
-- **While Claude works**, she walks around your screen.
+- **She lives her own life**: wanders around your screen, loafs, grooms, sunbathes, perches on top of windows, rubs against their sides, and bothers her plant. When Claude isn't working she also naps on her cushion.
 - **When Claude finishes or needs you**, she stops, meows and shows what it said in a speech bubble.
-- **The rest of the time** she lives her own life: naps on her cushion, loafs, grooms, sunbathes, perches on top of windows, rubs against their sides, and bothers her plant.
 
 She uses about 25 MB of memory.
 

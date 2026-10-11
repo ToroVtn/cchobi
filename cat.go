@@ -31,17 +31,27 @@ const (
 	headroom       = 48 // room above her, inside her window, for the hearts
 )
 
-// What she does when nobody needs her: activity -> how likely, how long in seconds.
-var idleActivities = []struct {
+// What she does, idle or while Claude works (but she only sleeps when idle): activity -> how likely, how long in seconds.
+var activities = []struct {
 	name    string
 	weight  float64
 	seconds [2]float64
-}{{"sleep", 5, [2]float64{120, 420}}, {"loaf", 2, [2]float64{30, 90}}, {"sphinx", 2, [2]float64{30, 90}},
-	{"groom", 2, [2]float64{8, 20}}, {"sun", 2, [2]float64{60, 180}}, {"perch", 2, [2]float64{30, 120}},
-	{"munch", 2, [2]float64{6, 12}}, {"plantrub", 1, [2]float64{5, 10}},
-	{"siderub", 2, [2]float64{5, 10}}, {"wallscratch", 1, [2]float64{4, 8}}, {"floorscratch", 1, [2]float64{4, 8}},
+}{
+	{"sleep", 5, [2]float64{120, 420}},
+	{"loaf", 2, [2]float64{30, 90}},
+	{"sphinx", 2, [2]float64{30, 90}},
+	{"groom", 2, [2]float64{8, 20}},
+	{"sun", 2, [2]float64{60, 180}},
+	{"perch", 2, [2]float64{30, 120}},
+	{"munch", 2, [2]float64{6, 12}},
+	{"plantrub", 2, [2]float64{5, 10}},
+	{"siderub", 2, [2]float64{5, 10}},
+	{"wallscratch", 2, [2]float64{4, 8}},
+	{"floorscratch", 2, [2]float64{4, 8}},
 	{"yawn", 1, [2]float64{3.2, 3.2}},
-	{"smack", 1, [2]float64{3, 4}}, {"stretch", 1, [2]float64{4.6, 4.6}}}
+	{"smack", 1, [2]float64{3, 4}},
+	{"stretch", 1, [2]float64{4.6, 4.6}},
+	{"wander", 2, [2]float64{0, 0}}}
 
 var (
 	follow     = map[string]string{"sleep": "stretch", "stretch": "yawn", "munch": "smack"} // waking up -> a stretch, then a yawn; after eating -> licking her lips
@@ -409,7 +419,6 @@ type Pet struct {
 	bubbleKey, tooltip                           string
 	activity                                     *Activity
 	x, y                                         float64      // her sprite's top left on screen
-	targetSpot                                   [2]float64   // where she's wandering to while Claude works
 	route                                        [][2]float64 // where she steps from screen to screen on her way somewhere
 	routeTo                                      rect         // the screen that route leads to
 }
@@ -458,7 +467,6 @@ func (p *Pet) start() {
 	}
 	p.activity = &Activity{name: "sleep", seconds: uniform(60, 300), arrived: true, until: mono() + uniform(20, 120)}
 	p.x, p.y, _ = p.target(p.activity)
-	p.targetSpot = [2]float64{p.x, p.y}
 	p.moveCat()
 	p.render()
 	p.win.show()
@@ -591,7 +599,7 @@ func (p *Pet) step() {
 	walking := fmt.Sprintf("%s%d", p.walkView, p.tick/2%p.sheet.WalkFrames)
 	breath := p.tick / 25 % 2 // slow breathing
 	busy := p.dragging || p.hover || now < p.petUntil || now < p.relishUntil || now < p.meowUntil ||
-		len(p.pending) > 0 || len(p.working) > 0
+		len(p.pending) > 0
 	if busy && p.activity != nil {
 		p.endActivity()
 	}
@@ -615,11 +623,6 @@ func (p *Pet) step() {
 		purring = true
 	case len(p.pending) > 0:
 		frame = "sit"
-	case len(p.working) > 0:
-		frame = walking
-		if p.walkVia(p.targetSpot[0], p.targetSpot[1]) {
-			p.targetSpot = p.randomSpot()
-		}
 	default:
 		frame = p.idle(now, walking, breath)
 	}
@@ -660,9 +663,10 @@ func (p *Pet) step() {
 
 func (p *Pet) idle(now float64, walking string, breath int) string {
 	act := p.activity
-	if act == nil || (act.arrived && now > act.until) {
+	wakeUp := act != nil && act.name == "sleep" && len(p.working) > 0 // Claude got to work: no more sleeping
+	if act == nil || (act.arrived && now > act.until) || wakeUp {
 		previous := ""
-		if act != nil {
+		if act != nil && act.arrived {
 			if act.name == "munch" {
 				p.eat(act.food) // finished her snack: that leaf is gone
 			}
@@ -710,6 +714,8 @@ func (p *Pet) idle(now float64, walking string, breath int) string {
 		return fmt.Sprintf("munch%d", t/3%4)
 	case "sleep":
 		return fmt.Sprintf("sleep%d", breath)
+	case "wander": // got there: on to the next thing
+		return walking
 	case "sun":
 		return fmt.Sprintf("sun%d", breath)
 	case "smack":
@@ -742,8 +748,8 @@ func (p *Pet) pickActivity(previous string) *Activity {
 			weight float64
 		}
 		var options []option
-		for _, a := range idleActivities {
-			if (a.name != "sun" || (hour >= 8 && hour < 18)) && (a.name != "perch" || len(p.perches()) > 0) &&
+		for _, a := range activities {
+			if (a.name != "sleep" || len(p.working) == 0) && (a.name != "sun" || (hour >= 8 && hour < 18)) && (a.name != "perch" || len(p.perches()) > 0) &&
 				(a.name != "siderub" || len(p.sides()) > 0) && (a.name != "munch" || len(p.foods()) > 0) &&
 				(a.name != "wallscratch" || len(p.sides()) > 0) && (a.name != "floorscratch" || len(p.floors()) > 0) {
 				options = append(options, option{a.name, a.weight})
@@ -759,7 +765,7 @@ func (p *Pet) pickActivity(previous string) *Activity {
 		}
 	}
 	act := &Activity{name: name}
-	for _, a := range idleActivities {
+	for _, a := range activities {
 		if a.name == name {
 			act.seconds = uniform(a.seconds[0], a.seconds[1])
 		}
@@ -789,7 +795,7 @@ func (p *Pet) pickActivity(previous string) *Activity {
 		x, y := p.place(p.sheet.Floor, float64(randInt(f.x+40, f.x+f.w-40)), float64(f.y), true)
 		act.spot = [2]float64{x, y}
 		act.facing = []int{1, -1}[rand.Intn(2)]
-	case "loaf", "sphinx", "groom", "sun":
+	case "loaf", "sphinx", "groom", "sun", "wander":
 		act.spot = p.randomSpot()
 	case "yawn", "smack", "stretch": // right where she is
 		act.spot = [2]float64{p.x, p.y}
@@ -1509,7 +1515,7 @@ func (p *Pet) onMotion(rx, ry, _, _ int) {
 	if p.dragging { // hold her by the belly: that pixel of the sprite stays under the pointer
 		p.x, p.y = p.place(p.sheet.HangGrab, float64(rx), float64(ry), p.facingRight)
 		p.moveCat()
-		p.route, p.targetSpot = nil, [2]float64{p.x, p.y} // walking resumes from wherever she's dropped
+		p.route = nil // walking resumes from wherever she's dropped
 	} else if p.press == nil { // the pointer is near her: she rubs against it
 		p.hover = true
 		p.pointerX = rx // she turns to it only once she's actually rubbing (see step)
