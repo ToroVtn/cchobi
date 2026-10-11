@@ -25,7 +25,7 @@ def tell(message):
         with socket.socket(socket.AF_UNIX) as s:
             s.connect(str(SOCK))
             s.sendall(json.dumps(message).encode() + b'\n')
-    except OSError:
+    except (OSError, AttributeError):  # AttributeError: no AF_UNIX (Windows' Python)
         pass
 
 

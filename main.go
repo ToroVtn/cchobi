@@ -116,7 +116,7 @@ var calls = make(chan func(), 256)
 func later(d time.Duration, f func()) { time.AfterFunc(d, func() { calls <- f }) }
 
 func run() error {
-	if err := openX(); err != nil {
+	if err := openDisplay(); err != nil {
 		return err
 	}
 	sheet, err := loadSheet()
@@ -225,7 +225,7 @@ func run() error {
 
 func tray(pet *Pet) {
 	icon, _ := pngOf(pet.sheet.get("sit"), 2)
-	systray.SetIcon(icon)
+	systray.SetIcon(trayIcon(icon))
 	systray.SetTitle("cchobi")
 	systray.SetTooltip("cchobi")
 	items := []struct {
@@ -254,7 +254,7 @@ func openSettings() {
 	if settingsProc != nil {
 		return
 	}
-	cmd := exec.Command("python3", here+"/settings.py")
+	cmd := exec.Command(python, here+"/settings.py")
 	if cmd.Start() == nil {
 		settingsProc = cmd.Process
 		go func() { cmd.Wait(); calls <- func() { settingsProc = nil } }()

@@ -1,8 +1,11 @@
+//go:build unix
+
 package main
 
 // Windows, straight on X11 (XWayland under Plasma): no toolkit. Each thing of hers on the
 // desktop is a borderless see-through window the window manager leaves alone. This file is all
-// that talks to X: another platform provides openX, Win, windowEvents and monitors.
+// that talks to X: another platform provides openDisplay, Win, windowEvents and monitors
+// (win32_windows.go).
 
 import (
 	"image"
@@ -22,7 +25,7 @@ var (
 	wins   = map[xproto.Window]*Win{}
 )
 
-func openX() error {
+func openDisplay() error {
 	var err error
 	if X, err = xgb.NewConn(); err != nil {
 		return err

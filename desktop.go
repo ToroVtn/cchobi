@@ -1,7 +1,8 @@
 package main
 
 // Screens and windows, whatever the platform. Where the other windows are and focusing one comes
-// from whichever desktop she's on (kwin.go, sway.go, ewmh.go); monitors, from the platform's file.
+// from whichever desktop she's on (desktop() in os_unix.go or os_windows.go picks); monitors, from
+// the platform's file.
 
 import (
 	"encoding/json"
@@ -16,19 +17,6 @@ import (
 // focusWindow brings up the window whose title has project in it (VS Code's, if vscode), and
 // says whether it's now the active one.
 var layout, focusWindow = desktop()
-
-func desktop() (func() (windows, areas []rect), func(project string, vscode bool) bool) {
-	switch {
-	case os.Getenv("SWAYSOCK") != "":
-		return swayLayout, swayFocus
-	case strings.Contains(os.Getenv("XDG_CURRENT_DESKTOP"), "KDE") || os.Getenv("KDE_FULL_SESSION") != "":
-		return kwinLayout, kwinFocus
-	case os.Getenv("WAYLAND_DISPLAY") == "": // plain X11: any window manager that speaks EWMH
-		return ewmhLayout, ewmhFocus
-	}
-	// another Wayland desktop: it hides other apps' windows from her
-	return func() ([]rect, []rect) { return nil, nil }, func(string, bool) bool { return false }
-}
 
 type rect struct{ x, y, w, h int }
 

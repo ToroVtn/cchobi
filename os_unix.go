@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -50,3 +51,21 @@ func fadeOut(proc *os.Process, volume float64) {
 		}
 	}()
 }
+
+func desktop() (func() (windows, areas []rect), func(project string, vscode bool) bool) {
+	switch {
+	case os.Getenv("SWAYSOCK") != "":
+		return swayLayout, swayFocus
+	case strings.Contains(os.Getenv("XDG_CURRENT_DESKTOP"), "KDE") || os.Getenv("KDE_FULL_SESSION") != "":
+		return kwinLayout, kwinFocus
+	case os.Getenv("WAYLAND_DISPLAY") == "": // plain X11: any window manager that speaks EWMH
+		return ewmhLayout, ewmhFocus
+	}
+	// another Wayland desktop: it hides other apps' windows from her
+	return func() ([]rect, []rect) { return nil, nil }, func(string, bool) bool { return false }
+}
+
+// trayIcon: the tray takes a PNG as it is.
+func trayIcon(png []byte) []byte { return png }
+
+const python = "python3"

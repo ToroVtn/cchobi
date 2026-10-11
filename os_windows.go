@@ -3,6 +3,7 @@ package main
 // What's done differently on Windows.
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"os"
@@ -39,3 +40,18 @@ func play(file string, volume float64) *os.Process {
 // ponytail: cuts it off, as ffplay can't change its volume once it's playing; an in-process
 // player (oto, say) if the cut is audible.
 func fadeOut(proc *os.Process, volume float64) { proc.Kill() }
+
+func desktop() (func() (windows, areas []rect), func(project string, vscode bool) bool) {
+	return winLayout, winFocus
+}
+
+// trayIcon: the tray wants an .ico, which can hold a PNG as it is behind a 22-byte header.
+func trayIcon(png []byte) []byte {
+	w, h := binary.BigEndian.Uint32(png[16:]), binary.BigEndian.Uint32(png[20:]) // from the PNG's IHDR
+	ico := []byte{0, 0, 1, 0, 1, 0, byte(w), byte(h), 0, 0, 1, 0, 32, 0}         // byte(256) is 0, which means 256
+	ico = binary.LittleEndian.AppendUint32(ico, uint32(len(png)))
+	ico = binary.LittleEndian.AppendUint32(ico, 22)
+	return append(ico, png...)
+}
+
+const python = "python" // what the installer from python.org puts on PATH

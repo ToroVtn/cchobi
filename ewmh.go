@@ -1,3 +1,5 @@
+//go:build unix
+
 package main
 
 // The desktop on plain X11, as any window manager that speaks EWMH tells it through properties on
