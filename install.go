@@ -1,7 +1,6 @@
 package main
 
-// cchobi install / uninstall: puts her (and settings.py and her default sounds, from next to this
-// binary) where she lives, adds her to the app menu, and hooks her up to Claude Code. What's
+// cchobi install / uninstall: puts her (one binary: everything else is built in) where she lives, adds her to the app menu, and hooks her up to Claude Code. What's
 // different per OS (where, and the menu entry) is in os_unix.go / os_windows.go.
 
 import (
@@ -26,20 +25,14 @@ func claudeSettings() string {
 func install() error {
 	dir := installDir()
 	exe, _ := os.Executable()
-	target := filepath.Join(dir, filepath.Base(exe))
+	target := filepath.Join(dir, "cchobi"+filepath.Ext(exe)) // not cchobi-setup.exe, cchobi-linux-amd64...
 	stopRunning()
+	installDeps()
 	if here != dir {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
 		if err := copyFile(exe, target, 0o755); err != nil {
-			return err
-		}
-		if err := copyFile(filepath.Join(here, "settings.py"), filepath.Join(dir, "settings.py"), 0o644); err != nil {
-			return err
-		}
-		os.RemoveAll(filepath.Join(dir, "sounds")) // CopyFS won't overwrite
-		if err := os.CopyFS(filepath.Join(dir, "sounds"), os.DirFS(filepath.Join(here, "sounds"))); err != nil {
 			return err
 		}
 	}
@@ -51,24 +44,24 @@ func install() error {
 	icon := filepath.Join(dir, "icon"+iconExt)
 	os.WriteFile(icon, trayIcon(png), 0o644)
 	if err := addLauncher(target, icon); err != nil {
-		fmt.Println("couldn't add her to the app menu:", err)
+		say("Couldn't add her to the app menu: %v", err)
 	}
 	if err := editHooks(fmt.Sprintf("%q hook", filepath.ToSlash(target))); err != nil {
 		return fmt.Errorf("hooking her up to Claude Code: %w", err)
 	}
-	fmt.Printf("Installed in %s, added to the app menu, and hooked up to Claude Code (%s).\n", dir, claudeSettings())
+	say("Installed in %s, added to the app menu, and hooked up to Claude Code (%s).", dir, claudeSettings())
 	for _, r := range requirements() {
 		if _, err := exec.LookPath(r[0]); err != nil {
-			fmt.Printf("Missing %s: needed for %s.\n", r[0], r[1])
+			say("Missing %s: needed for %s.", r[0], r[1])
 		}
 	}
-	if exec.Command(python, "-c", "import PySide6").Run() != nil {
-		fmt.Println("Missing PySide6 (pip install PySide6): needed for the Settings window.")
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		say("Optional: ffmpeg, to give her sounds that aren't .wav (an .mp3, a video...).")
 	}
 	cmd := exec.Command(target)
 	detach(cmd)
 	if cmd.Start() == nil {
-		fmt.Println("She's starting. From now on, starting a Claude Code session also starts her.")
+		say("She's starting. From now on, starting a Claude Code session also starts her.")
 	}
 	return nil
 }
@@ -80,8 +73,18 @@ func uninstall() error {
 	}
 	removeLauncher()
 	removeDir(installDir())
-	fmt.Printf("Uninstalled. Her sounds and state are still in %s; delete that too to forget her completely.\n", data)
+	say("Uninstalled. Her sounds and state are still in %s; delete that too to forget her completely.", data)
 	return nil
+}
+
+// said: everything install or uninstall has said, for a message box when there's no terminal to
+// show it (cchobi-setup.exe, double-clicked).
+var said strings.Builder
+
+func say(format string, a ...any) {
+	s := fmt.Sprintf(format, a...) + "\n"
+	fmt.Print(s)
+	said.WriteString(s)
 }
 
 // stopRunning asks a running pet to quit, and waits until she has.

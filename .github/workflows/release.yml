@@ -1,0 +1,46 @@
+# On a version tag (git tag v0.2.0 && git push --tags): test, build her for Linux and Windows,
+# and publish a release with the builds and the install scripts.
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet . && GOOS=windows go vet . && go test .
+      - name: build
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          mkdir dist
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH=$arch go build -trimpath -ldflags="-s -w" -o dist/cchobi-linux-$arch .
+          done
+          # one Windows build: ARM Windows runs it too
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -H=windowsgui" -o dist/cchobi-setup.exe .
+          cp install.sh install.ps1 dist/
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<NOTES
+          **Linux**, in a terminal:
+          \`\`\`sh
+          curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install.sh | sh
+          \`\`\`
+          **Windows**: download **cchobi-setup.exe** below and double-click it (Windows may warn that it's from an unknown publisher: More info, then Run anyway). Or in PowerShell:
+          \`\`\`powershell
+          irm https://github.com/${{ github.repository }}/releases/latest/download/install.ps1 | iex
+          \`\`\`
+          **With Go**, anywhere: \`go install github.com/${{ github.repository }}@latest && cchobi install\`
+
+          Run the same again to update her. The other files below are what these use.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file notes.md

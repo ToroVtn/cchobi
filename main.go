@@ -12,12 +12,13 @@
 // rubs against the pointer, right-click for a treat. Click her speech bubble to jump to that
 // session's tab; right-click the bubble to read more of the message.
 //
-// Build: go build (sprites: python3 sprites.py, after changing a drawing). Settings is a separate
-// little window (settings.py) that only runs while it's open.
+// Build: go build (sprites: python3 sprites.py, after changing a drawing). Everything she needs at
+// run time is built in: her sprites, font fallback and default sounds.
 package main
 
 import (
 	"bufio"
+	"embed"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -47,7 +48,6 @@ var (
 	sock     = runtime_ + "/cchobi.sock"
 	data     = home + "/.cchobi"    // her sounds; change them from Settings, or by hand
 	stateF   = data + "/state.json" // where her things are, her plant's state, which sounds are off
-	defaults = here + "/sounds"     // her default sounds: copied into ~/.cchobi the first time
 	kinds    = []string{"meows", "purrs", "water"}
 	// Each sound is also kept at a few speeds (faster is also higher), made once with ffmpeg into
 	// <kind>/variants/, so she doesn't sound the same every time. Meows play as they are.
@@ -71,6 +71,10 @@ func envOr(k, def string) string {
 func parseFloat(s string) (float64, error) { return strconv.ParseFloat(strings.TrimSpace(s), 64) }
 
 func main() {
+	exe, _ := os.Executable()
+	if len(os.Args) == 1 && strings.Contains(strings.ToLower(filepath.Base(exe)), "setup") {
+		os.Args = append(os.Args, "install") // cchobi-setup.exe, double-clicked
+	}
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "hook":
@@ -78,8 +82,12 @@ func main() {
 			return
 		case "install", "uninstall":
 			do := map[string]func() error{"install": install, "uninstall": uninstall}[os.Args[1]]
-			if err := do(); err != nil {
-				fmt.Println("cchobi:", err)
+			err := do()
+			if err != nil {
+				say("cchobi: %v", err)
+			}
+			showSaid(err != nil)
+			if err != nil {
 				os.Exit(1)
 			}
 			return
@@ -89,6 +97,7 @@ func main() {
 		c.Close()
 		return
 	}
+	freeConsole()
 	debug.SetGCPercent(50) // she's tiny: keep the heap close to what's actually in use
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "cchobi:", err)
@@ -141,12 +150,7 @@ func run() error {
 	for _, k := range kinds { // first time here: start her off with the default sounds
 		if _, err := os.Stat(data + "/" + k); err != nil {
 			os.MkdirAll(data+"/"+k, 0o755)
-			files, _ := filepath.Glob(defaults + "/" + k + "/*")
-			for _, f := range files {
-				if b, err := os.ReadFile(f); err == nil {
-					os.WriteFile(data+"/"+k+"/"+filepath.Base(f), b, 0o644)
-				}
-			}
+			copyDefaults(k)
 		}
 	}
 	var state struct {
@@ -244,7 +248,7 @@ func tray(pet *Pet) {
 		title string
 		do    func()
 	}{{"Give her a treat", pet.treat}, {"Water the plant", pet.water}, {"Throw away dry leaves", pet.throwAway},
-		{"", nil}, {"Settings…", openSettings}, {"Quit", func() { calls <- nil }}}
+		{"", nil}, {"Settings…", pet.settings.popup}, {"Quit", func() { calls <- nil }}}
 	for _, it := range items {
 		if it.do == nil {
 			systray.AddSeparator()
@@ -256,20 +260,6 @@ func tray(pet *Pet) {
 				calls <- do
 			}
 		}()
-	}
-}
-
-var settingsProc *os.Process
-
-// openSettings: the sounds window, a separate small program that only runs while it's open.
-func openSettings() {
-	if settingsProc != nil {
-		return
-	}
-	cmd := exec.Command(python, here+"/settings.py")
-	if cmd.Start() == nil {
-		settingsProc = cmd.Process
-		go func() { cmd.Wait(); calls <- func() { settingsProc = nil } }()
 	}
 }
 
@@ -286,9 +276,9 @@ type Sound struct {
 // Sounds: what she can play, each kind with its variants.
 type Sounds map[string][]Sound
 
-// scanSounds looks through her sound folders (in the background: it may run ffmpeg) and makes
-// any missing variants. Anything that isn't a .wav in meows/ (a cropped video, say) is
-// converted once, with the low rumble filtered out.
+// scanSounds looks through her sound folders (in the background: it takes a moment) and makes
+// any missing variants. Anything that isn't a .wav (a cropped video, say) is converted once with
+// ffmpeg, if it's there; in meows/, with the low rumble filtered out.
 func scanSounds(done func(*Sounds)) {
 	out := Sounds{}
 	for _, kind := range kinds {
@@ -297,8 +287,12 @@ func scanSounds(done func(*Sounds)) {
 		for _, f := range files {
 			ext := strings.ToLower(filepath.Ext(f))
 			wav := strings.TrimSuffix(f, filepath.Ext(f)) + ".wav"
-			if st, err := os.Stat(f); err == nil && st.Mode().IsRegular() && kind == "meows" && ext != ".wav" && !exists(wav) {
-				exec.Command("ffmpeg", "-v", "error", "-i", f, "-vn", "-ac", "1", "-af", "highpass=f=200", wav).Run()
+			if st, err := os.Stat(f); err == nil && st.Mode().IsRegular() && ext != ".wav" && !exists(wav) {
+				af := "anull"
+				if kind == "meows" {
+					af = "highpass=f=200"
+				}
+				exec.Command("ffmpeg", "-v", "error", "-i", f, "-vn", "-ac", "1", "-af", af, wav).Run()
 			}
 		}
 		wavs, _ := filepath.Glob(dir + "/*.wav")
@@ -319,14 +313,13 @@ func scanSounds(done func(*Sounds)) {
 				keep[v] = true
 				if newer(f, v) {
 					os.MkdirAll(dir+"/variants", 0o755)
-					rate, seconds := wavInfo(f)
-					af := fmt.Sprintf("asetrate=%.0f,aresample=%d", float64(rate)*speed, rate)
-					if kind == "purrs" {
-						d := fadeFor(seconds)
-						af = fmt.Sprintf("afade=t=in:d=%.3f:curve=hsin,afade=t=out:st=%.3f:d=%.3f:curve=hsin,",
-							d, seconds-d, d) + af
+					if in, rate, err := readWav(f); err == nil {
+						fade := 0.0
+						if kind == "purrs" {
+							fade = fadeFor(float64(len(in)) / float64(rate))
+						}
+						writeWav(v, variant(in, rate, speed, fade), rate)
 					}
-					exec.Command("ffmpeg", "-v", "error", "-y", "-i", f, "-ac", "1", "-af", af, v).Run()
 				}
 				out[kind] = append(out[kind], Sound{v, wavSeconds(v), name})
 			}
@@ -339,6 +332,22 @@ func scanSounds(done func(*Sounds)) {
 		}
 	}
 	done(&out)
+}
+
+// defaultSounds: her default sounds, built in, copied into ~/.cchobi the first time (and by Reset).
+//
+//go:embed sounds
+var defaultSounds embed.FS
+
+// copyDefaults puts her default sounds of a kind into its folder (any already there stay).
+func copyDefaults(kind string) {
+	entries, _ := defaultSounds.ReadDir("sounds/" + kind)
+	for _, e := range entries {
+		if f := filepath.Join(data, kind, e.Name()); !exists(f) {
+			b, _ := defaultSounds.ReadFile("sounds/" + kind + "/" + e.Name())
+			os.WriteFile(f, b, 0o644)
+		}
+	}
 }
 
 func exists(f string) bool { _, err := os.Stat(f); return err == nil }

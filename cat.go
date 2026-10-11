@@ -397,10 +397,11 @@ type Pet struct {
 	card                                         *Card
 	garden                                       *Garden
 	muted                                        map[string][]string // sounds switched off in Settings
+	settings                                     *Settings
 	sounds                                       *Sounds
 	nextPurr, purrEnd, purrVolume                float64
-	purring                                      *os.Process // the purr playing now, to fade out when she stops
-	leaves                                       []*Prop     // dry leaves lying about
+	purring                                      *playing // the purr playing now, to fade out when she stops
+	leaves                                       []*Prop  // dry leaves lying about
 	flights                                      []*Flight
 	working                                      map[string]float64 // session -> last time we heard it working
 	pending                                      []*Pending         // newest last
@@ -443,6 +444,7 @@ func newPet(s *Sheet, g *Garden, muted map[string][]string) *Pet {
 	p.can = newProp(frames("can", 6)) // only out while you're watering
 	p.bin = newProp(frames("bin", 2)) // only out while you're throwing leaves away
 	p.card = newCard(s, g)
+	p.settings = newSettings(p)
 	cat := s.Size * scale
 	p.win = newWin(cat, cat+headroom) // created last, so she's above her things
 	p.bubble = newWin(1, 1)
@@ -487,21 +489,12 @@ func (p *Pet) save() {
 	}
 }
 
-// ---- events from Claude Code (and from Settings) ----
+// ---- events from Claude Code (and the installer) ----
 
 func str(v any) string { s, _ := v.(string); return s }
 
 func (p *Pet) handle(e map[string]any) {
-	switch e["cchobi"] { // from Settings (or the installer)
-	case "muted":
-		b, _ := json.Marshal(e["muted"])
-		json.Unmarshal(b, &p.muted)
-		p.save()
-		return
-	case "sounds":
-		go scanSounds(func(s *Sounds) { calls <- func() { p.sounds = s } })
-		return
-	case "quit": // from cchobi install, to replace her
+	if e["cchobi"] == "quit" { // from cchobi install, to replace her
 		calls <- nil
 		return
 	}
@@ -657,6 +650,9 @@ func (p *Pet) step() {
 	p.render()
 	if p.pouring {
 		p.pour()
+	}
+	if p.settings.shown {
+		p.settings.step()
 	}
 	if p.card.shown {
 		p.card.step()

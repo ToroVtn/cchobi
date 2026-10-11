@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/godbus/dbus/v5"
 )
 
 // kwinAsk runs a KWin script and returns what it prints after tag (a const it's given), or "" if
@@ -19,9 +21,12 @@ func kwinAsk(source, name string) string {
 	tag := fmt.Sprintf("cchobi-%x ", rand.Uint32())
 	js := runtime_ + "/" + name + ".js"
 	os.WriteFile(js, []byte(fmt.Sprintf("const tag = %q;\n", tag)+source), 0o644)
-	q := func(args ...string) {
-		exec.Command("qdbus6", append([]string{"org.kde.KWin", "/Scripting"}, args...)...).Run()
+	bus, err := dbus.SessionBus()
+	if err != nil {
+		return ""
 	}
+	kwin := bus.Object("org.kde.KWin", "/Scripting")
+	q := func(method string, args ...any) { kwin.Call(method, 0, args...) }
 	// start runs whatever's loaded and not yet running. (Not Script<id>.run: KWin hands out ids
 	// that loaded scripts still have, so that can reach some other script.)
 	q("org.kde.kwin.Scripting.unloadScript", name)
