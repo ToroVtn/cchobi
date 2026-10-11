@@ -492,7 +492,7 @@ func (p *Pet) save() {
 func str(v any) string { s, _ := v.(string); return s }
 
 func (p *Pet) handle(e map[string]any) {
-	switch e["cchobi"] { // from Settings
+	switch e["cchobi"] { // from Settings (or the installer)
 	case "muted":
 		b, _ := json.Marshal(e["muted"])
 		json.Unmarshal(b, &p.muted)
@@ -500,6 +500,9 @@ func (p *Pet) handle(e map[string]any) {
 		return
 	case "sounds":
 		go scanSounds(func(s *Sounds) { calls <- func() { p.sounds = s } })
+		return
+	case "quit": // from cchobi install, to replace her
+		calls <- nil
 		return
 	}
 	sid, now := str(e["session_id"]), mono()

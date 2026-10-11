@@ -5,10 +5,12 @@ package main
 // What's done differently on Linux (and other Unixes) than on Windows.
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -69,3 +71,44 @@ func desktop() (func() (windows, areas []rect), func(project string, vscode bool
 func trayIcon(png []byte) []byte { return png }
 
 const python = "python3"
+
+// ---- installing ----
+
+func dataHome() string {
+	return cmp.Or(os.Getenv("XDG_DATA_HOME"), filepath.Join(home, ".local/share"))
+}
+
+func installDir() string { return filepath.Join(dataHome(), "cchobi") }
+
+const iconExt = ".png"
+
+func launcher() string { return filepath.Join(dataHome(), "applications", "cchobi.desktop") }
+
+func addLauncher(exe, icon string) error {
+	os.MkdirAll(filepath.Dir(launcher()), 0o755)
+	return os.WriteFile(launcher(), []byte(fmt.Sprintf(`[Desktop Entry]
+Type=Application
+Name=cchobi
+Comment=A desktop pet for Claude Code
+Exec=%q
+Icon=%s
+Categories=Utility;
+Terminal=false
+`, exe, icon)), 0o644)
+}
+
+func removeLauncher() { os.Remove(launcher()) }
+
+func removeDir(dir string) { os.RemoveAll(dir) }
+
+// requirements: the programs she runs, and what for.
+func requirements() [][2]string {
+	r := [][2]string{{"ffmpeg", "her sounds"}, {"paplay", "playing her sounds"}, {"pactl", "fading out her purr"},
+		{python, "the Settings window"}}
+	if os.Getenv("SWAYSOCK") != "" {
+		r = append(r, [2]string{"swaymsg", "knowing where windows are, on sway"})
+	} else if strings.Contains(os.Getenv("XDG_CURRENT_DESKTOP"), "KDE") {
+		r = append(r, [2]string{"qdbus6", "knowing where windows are, on KDE"}, [2]string{"journalctl", "the same"})
+	}
+	return r
+}

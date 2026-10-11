@@ -5,6 +5,8 @@
 //
 //	cchobi        run the pet (the SessionStart hook also starts it)
 //	cchobi hook   what Claude Code hooks call: forwards the hook's JSON to the pet
+//	cchobi install    install her for you, add her to the app menu and hook her up to Claude Code
+//	cchobi uninstall  undo that (her sounds and state in ~/.cchobi stay)
 //
 // Mouse: click her to pet her (that also dismisses her message), drag to carry her, hover and she
 // rubs against the pointer, right-click for a treat. Click her speech bubble to jump to that
@@ -69,9 +71,19 @@ func envOr(k, def string) string {
 func parseFloat(s string) (float64, error) { return strconv.ParseFloat(strings.TrimSpace(s), 64) }
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "hook" {
-		hook()
-		return
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "hook":
+			hook()
+			return
+		case "install", "uninstall":
+			do := map[string]func() error{"install": install, "uninstall": uninstall}[os.Args[1]]
+			if err := do(); err != nil {
+				fmt.Println("cchobi:", err)
+				os.Exit(1)
+			}
+			return
+		}
 	}
 	if c, err := net.Dial("unix", sock); err == nil { // already running? then leave it be
 		c.Close()

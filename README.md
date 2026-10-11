@@ -66,6 +66,17 @@ You can also just drop `.wav` files into the folders. In `meows/`, other formats
 
 ## Setup
 
+### Install
+
+With [Go](https://go.dev/dl/) installed (see Requirements for the rest):
+
+- **Linux:** run `./install.sh`
+- **Windows:** double-click `install.cmd`
+
+That builds her, puts her in `~/.local/share/cchobi` (Windows: `%LOCALAPPDATA%\cchobi`), adds her to the app menu (Windows: the Start menu), hooks her up to Claude Code in `~/.claude/settings.json` (the old one is kept as `settings.json.bak`), tells you what's missing, and starts her. Run it again to update her: it stops her, swaps her in, and starts her again.
+
+To take her out: `./install.sh uninstall` (Windows: `install.cmd uninstall`). Her sounds and state in `~/.cchobi` stay.
+
 ### Requirements
 
 | What | Needed for |
@@ -83,7 +94,7 @@ You can also just drop `.wav` files into the folders. In `meows/`, other formats
 | `paplay` and `pactl` (PulseAudio or PipeWire) | Sounds, on Linux |
 | fontconfig | Finding your KDE fixed-width font (without it: Go Mono) |
 
-### Build
+### Build by hand
 
 ```sh
 python3 sprites.py   # redraws assets/sprites.png + sprites.json (only needed after changing a drawing)
@@ -99,7 +110,9 @@ go build -ldflags="-s -w -H=windowsgui" -o cchobi.exe .
 
 The sprite sheet is built into the binary. `settings.py` and `sounds/` must sit next to it, so to run her elsewhere, copy those three.
 
-### Hook her up to Claude Code
+### Hook her up to Claude Code by hand
+
+The installer does this for you.
 
 Add the hook to `~/.claude/settings.json` for each of these events: `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Notification`, `Stop`, `SessionEnd`. Here it is for one:
 
@@ -126,7 +139,8 @@ Add the hook to `~/.claude/settings.json` for each of these events: `SessionStar
 | `draw.go` | The sprite sheet, boxes and text, drawn into plain images |
 | `desktop.go` | Screens, and picking which desktop she asks where windows are: `kwin.go` (KDE), `sway.go`, `ewmh.go` (any X11 window manager). `desktop_test.go` checks the sway parsing. |
 | `win32_windows.go` | `x11.go` and the desktop's file in one, for Windows: her windows (layered, per-pixel alpha), the screens, and finding and focusing other windows |
-| `os_unix.go`, `os_windows.go` | Playing sounds, starting detached, and picking the desktop, per OS |
+| `os_unix.go`, `os_windows.go` | Playing sounds, starting detached, picking the desktop, and where installing puts things, per OS |
+| `install.go` | `cchobi install` / `uninstall`, which `install.sh` and `install.cmd` run: copying her into place, the menu entry, the Claude Code hooks. `install_test.go` checks the hook editing keeps everything else. |
 | `sprites.py` | Draws every frame procedurally and exports the sprite sheet. Each frame is built from shapes, then shaded with rim light and dithering. |
 | `settings.py` | The Settings window. A separate program that runs only while it's open and tells her about changes over her socket. |
 | `tools/clean_meows.py` | The meow cleaner |

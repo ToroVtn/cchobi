@@ -8,6 +8,8 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -55,3 +57,42 @@ func trayIcon(png []byte) []byte {
 }
 
 const python = "python" // what the installer from python.org puts on PATH
+
+// ---- installing ----
+
+func installDir() string { return filepath.Join(os.Getenv("LOCALAPPDATA"), "cchobi") }
+
+const iconExt = ".ico"
+
+func launcher() string {
+	return filepath.Join(os.Getenv("APPDATA"), `Microsoft\Windows\Start Menu\Programs\cchobi.lnk`)
+}
+
+// addLauncher: a Start menu shortcut, made through PowerShell (a .lnk is a COM object's file).
+func addLauncher(exe, icon string) error {
+	q := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+	script := fmt.Sprintf(`$s = (New-Object -ComObject WScript.Shell).CreateShortcut(%s); $s.TargetPath = %s; `+
+		`$s.IconLocation = %s; $s.Description = 'A desktop pet for Claude Code'; $s.Save()`, q(launcher()), q(exe), q(icon))
+	if err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script).Run(); err != nil {
+		return err
+	}
+	_, err := os.Stat(launcher()) // PowerShell can say it went fine when it didn't
+	return err
+}
+
+func removeLauncher() { os.Remove(launcher()) }
+
+// removeDir: a running program can't delete itself on Windows, so if that's what's in dir, a
+// detached cmd deletes it once this one has exited.
+func removeDir(dir string) {
+	if os.RemoveAll(dir) != nil {
+		cmd := exec.Command("cmd", "/c", "ping -n 3 127.0.0.1 >nul & rmdir /s /q", dir)
+		cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: detachedProcess | createNoWindow}
+		cmd.Start()
+	}
+}
+
+// requirements: the programs she runs, and what for.
+func requirements() [][2]string {
+	return [][2]string{{"ffmpeg", "her sounds"}, {"ffplay", "playing her sounds"}, {python, "the Settings window"}}
+}
