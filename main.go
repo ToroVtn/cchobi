@@ -190,6 +190,9 @@ func run() error {
 						calls <- func() { pet.handle(e) }
 					}
 				}
+				if err := lines.Err(); err != nil { // e.g. a line over the 4 MB buffer: the rest of that connection is dropped
+					fmt.Fprintln(os.Stderr, "cchobi:", err)
+				}
 			}()
 		}
 	}()
